@@ -1,0 +1,301 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Free Writing Humanizer</title>
+<style>
+  :root{--bg:#0f172a;--card:#0b1220;--accent:#06b6d4;--muted:#94a3b8;--text:#e6eef6}
+  body{font-family:Inter,system-ui,Segoe UI,Roboto,"Helvetica Neue",Arial;margin:0;background:linear-gradient(180deg,#071028 0%, #071826 100%);color:var(--text);min-height:100vh;display:flex;align-items:center;justify-content:center;padding:28px}
+  .container{width:100%;max-width:980px;background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));border-radius:12px;padding:22px;box-shadow:0 10px 30px rgba(2,6,23,0.6)}
+  h1{margin:0 0 6px;font-weight:600}
+  p.lead{color:var(--muted);margin-top:0;margin-bottom:12px}
+  textarea{width:100%;min-height:160px;padding:12px;border-radius:8px;border:1px solid rgba(255,255,255,0.04);background:transparent;color:var(--text);resize:vertical;font-size:15px}
+  .row{display:flex;gap:12px;flex-wrap:wrap;margin-top:12px}
+  .col{flex:1;min-width:180px}
+  label.option{display:flex;align-items:center;gap:8px;background:rgba(255,255,255,0.02);padding:8px;border-radius:8px;border:1px solid rgba(255,255,255,0.02);cursor:pointer}
+  button{background:var(--accent);color:#021024;padding:10px 14px;border-radius:10px;border:0;font-weight:600;cursor:pointer}
+  .controls{display:flex;gap:8px;align-items:center;margin-top:12px}
+  .output{margin-top:14px}
+  .small{font-size:13px;color:var(--muted)}
+  .footer{margin-top:14px;color:var(--muted);font-size:13px}
+  .chip{background:rgba(255,255,255,0.02);padding:6px 8px;border-radius:999px;font-size:13px;border:1px solid rgba(255,255,255,0.02)}
+  .row-inline{display:flex;gap:8px;flex-wrap:wrap}
+  .copybtn{background:#152532;color:var(--text);padding:8px 10px;border-radius:8px;border:1px solid rgba(255,255,255,0.03);cursor:pointer}
+  footer.center{display:flex;justify-content:space-between;align-items:center;margin-top:18px}
+  @media(max-width:720px){.col{min-width:100%}}
+</style>
+</head>
+<body>
+<div class="container" role="main">
+  <h1>Free Writing Humanizer</h1>
+  <p class="lead">Polish text to sound more natural and readable. Runs fully in your browser — no servers, no third-party APIs.</p>
+
+  <textarea id="inputText" placeholder="Paste your text here...">Paste or type text here to humanize. Example: This tool is designed to make text read more naturally and casually, while preserving meaning.</textarea>
+
+  <div class="row">
+    <div class="col">
+      <label class="option"><input type="checkbox" id="optContractions" checked> Use contractions</label>
+    </div>
+    <div class="col">
+      <label class="option"><input type="checkbox" id="optSynonyms" checked> Swap some synonyms</label>
+    </div>
+    <div class="col">
+      <label class="option"><input type="checkbox" id="optVary"> Vary sentence length (split/merge)</label>
+    </div>
+    <div class="col">
+      <label class="option"><input type="checkbox" id="optAsides" checked> Add small asides</label>
+    </div>
+  </div>
+
+  <div class="row" style="margin-top:10px;">
+    <div class="col">
+      <label class="option"><input type="checkbox" id="optColloquial"> Colloquial endings (e.g., "you know?")</label>
+    </div>
+    <div class="col">
+      <label class="option"><input type="checkbox" id="optEmoji"> Light emoji</label>
+    </div>
+    <div class="col">
+      <label class="option"><input type="checkbox" id="optCreative"> More creative edits</label>
+    </div>
+    <div class="col">
+      <label class="option"><input type="checkbox" id="optInformalCaps"> Informal capitalization</label>
+    </div>
+  </div>
+
+  <div class="controls">
+    <button id="btnHumanize">Humanize / Edit</button>
+    <button class="copybtn" id="btnCopyOutput">Copy output</button>
+    <div class="chip" id="status">Ready</div>
+  </div>
+
+  <div class="output">
+    <h3 style="margin:10px 0 6px">Edited text</h3>
+    <textarea id="outputText" readonly></textarea>
+  </div>
+
+  <footer class="center footer">
+    <div class="small">Runs locally in your browser. Do not use to deceive or impersonate.</div>
+    <div style="display:flex;gap:8px;align-items:center">
+      <button id="btnDownload" class="copybtn">Download .txt</button>
+      <button id="btnClear" class="copybtn">Clear</button>
+    </div>
+  </footer>
+</div>
+
+<script>
+/*
+ Simple on-device humanizer heuristics.
+ Not perfect, but self-contained and fast.
+*/
+
+const CONTRACTIONS = {
+  "do not":"don't","does not":"doesn't","did not":"didn't",
+  "is not":"isn't","are not":"aren't","will not":"won't",
+  "i am":"I'm","i will":"I'll","i would":"I'd","i have":"I've",
+  "we are":"we're","they are":"they're","they will":"they'll",
+  "cannot":"can't","can not":"can't","let us":"let's","that is":"that's",
+  "there is":"there's","it is":"it's","you are":"you're"
+};
+
+const HUMAN_ASIDES = [
+  "to be honest,","frankly,","honestly,","you know,","believe it or not,",
+  "that said,","on the plus side,","oddly enough,","as it happens,"
+];
+
+const COLLOQUIAL_ENDINGS = ["right?","you know?","I guess.","sort of.","kind of."];
+
+const EMOJIS = ["🙂","👍","🙃","✨","😉","🤔"];
+
+function applyContractions(text){
+  let out = text;
+  // replace longer phrases first
+  const keys = Object.keys(CONTRACTIONS).sort((a,b)=>b.length-a.length);
+  for(const k of keys){
+    // word-boundary replace, case-insensitive
+    const re = new RegExp('\\b'+escapeRegExp(k)+'\\b','ig');
+    out = out.replace(re, (m)=> matchCase(CONTRACTIONS[k], m));
+  }
+  return out;
+}
+function escapeRegExp(s){ return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+function matchCase(replacement, original){
+  if(!original) return replacement;
+  if(original[0] === original[0].toUpperCase()) return replacement[0].toUpperCase()+replacement.slice(1);
+  return replacement;
+}
+
+function sentenceSplit(text){
+  // naive sentence split — good enough for edits
+  return text.split(/(?<=[.!?])\s+/);
+}
+function sentenceJoin(sents){
+  return sents.join(' ');
+}
+
+function swapSomeSynonyms(sentence, prob){
+  // VERY small synonym map for client-side use (no external libs).
+  // This map is intentionally tiny — extend as you like.
+  const map = {
+    "important":"significant",
+    "help":"assist",
+    "show":"demonstrate",
+    "use":"utilize",
+    "increase":"boost",
+    "decrease":"reduce",
+    "start":"begin",
+    "try":"attempt",
+    "big":"major",
+    "small":"minor",
+    "good":"great",
+    "bad":"poor",
+    "people":"folks",
+    "children":"kids",
+    "ask":"request",
+    "work":"operate",
+    "think":"feel"
+  };
+  // split by tokens preserving punctuation
+  const tokens = sentence.split(/(\s+|[,.!?;:()])/);
+  for(let i=0;i<tokens.length;i++){
+    const t = tokens[i];
+    if(!t || /^\s+$/.test(t) || /[,.!?;:()]/.test(t)) continue;
+    const low = t.toLowerCase();
+    if(Math.random() < prob && map[low]){
+      const alt = map[low];
+      // preserve capitalization
+      tokens[i] = (t[0] === t[0].toUpperCase() ? capitalize(alt) : alt);
+    }
+  }
+  return tokens.join('');
+}
+
+function capitalize(s){ return s.charAt(0).toUpperCase() + s.slice(1); }
+
+function varySentenceLength(sents, splitProb, mergeProb){
+  const out = [];
+  for(let i=0;i<sents.length;i++){
+    let s = sents[i].trim();
+    // try merge
+    if(i+1 < sents.length && Math.random() < mergeProb){
+      s = s + ' ' + sents[i+1].trim();
+      out.push(s);
+      i++; // skip next
+      continue;
+    }
+    // try split long sentence
+    const words = s.split(/\s+/);
+    if(words.length > 20 && Math.random() < splitProb){
+      const cut = Math.floor(words.length/2) + (Math.floor(Math.random()*5)-2);
+      const a = words.slice(0,cut).join(' ') + '.';
+      const b = words.slice(cut).join(' ');
+      out.push(a);
+      out.push(b);
+      continue;
+    }
+    out.push(s);
+  }
+  return out;
+}
+
+function addHumanAsides(sentence, prob){
+  if(Math.random() < prob){
+    const aside = HUMAN_ASIDES[Math.floor(Math.random()*HUMAN_ASIDES.length)];
+    if(Math.random() < 0.5) return aside + ' ' + sentence;
+    // try insert after first comma or after first clause
+    const parts = sentence.split(',');
+    if(parts.length > 1){
+      parts.splice(1,0, aside);
+      return parts.map(p=>p.trim()).join(', ');
+    }
+    return aside + ' ' + sentence;
+  }
+  return sentence;
+}
+
+function maybeAddColloquialEnding(sentence, prob){
+  if(Math.random() < prob && !/[?!]$/.test(sentence.trim())){
+    return sentence.trim() + ' ' + COLLOQUIAL_ENDINGS[Math.floor(Math.random()*COLLOQUIAL_ENDINGS.length)];
+  }
+  return sentence;
+}
+
+function maybeAddEmoji(sentence, prob){
+  if(Math.random() < prob){
+    return sentence + ' ' + EMOJIS[Math.floor(Math.random()*EMOJIS.length)];
+  }
+  return sentence;
+}
+
+function humanize(text, options){
+  let t = text.replace(/\s+/g,' ').trim();
+  if(!t) return '';
+  if(options.contractions) t = applyContractions(t);
+  let sents = sentenceSplit(t);
+  if(options.vary){
+    sents = varySentenceLength(sents, options.creative ? 0.18 : 0.12, options.creative ? 0.14 : 0.09);
+  }
+  const processed = sents.map(s=>{
+    let out = s;
+    if(options.synonyms) out = swapSomeSynonyms(out, options.creative ? 0.16 : 0.10);
+    if(options.asides) out = addHumanAsides(out, options.creative ? 0.16 : 0.10);
+    if(options.colloquial) out = maybeAddColloquialEnding(out, options.creative ? 0.12 : 0.06);
+    if(options.emoji) out = maybeAddEmoji(out, options.creative ? 0.12 : 0.06);
+    if(options.informalCaps && Math.random() < 0.06){
+      out = out.charAt(0).toLowerCase() + out.slice(1);
+    }
+    return out;
+  });
+  return processed.join(' ');
+}
+
+/* UI wiring */
+document.getElementById('btnHumanize').addEventListener('click', ()=>{
+  const input = document.getElementById('inputText').value;
+  const opts = {
+    contractions: document.getElementById('optContractions').checked,
+    synonyms: document.getElementById('optSynonyms').checked,
+    vary: document.getElementById('optVary').checked,
+    asides: document.getElementById('optAsides').checked,
+    colloquial: document.getElementById('optColloquial').checked,
+    emoji: document.getElementById('optEmoji').checked,
+    creative: document.getElementById('optCreative').checked,
+    informalCaps: document.getElementById('optInformalCaps').checked
+  };
+  const out = humanize(input, opts);
+  document.getElementById('outputText').value = out;
+  document.getElementById('status').textContent = 'Done';
+});
+
+document.getElementById('btnCopyOutput').addEventListener('click', async ()=>{
+  const out = document.getElementById('outputText').value;
+  if(!out) return;
+  try{
+    await navigator.clipboard.writeText(out);
+    document.getElementById('status').textContent = 'Copied';
+    setTimeout(()=>document.getElementById('status').textContent='Ready',1200);
+  }catch(e){
+    alert('Copy failed — select & copy manually.');
+  }
+});
+
+document.getElementById('btnDownload').addEventListener('click', ()=>{
+  const out = document.getElementById('outputText').value || document.getElementById('inputText').value;
+  const blob = new Blob([out], {type:'text/plain;charset=utf-8'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'humanized.txt';
+  a.click();
+  URL.revokeObjectURL(url);
+});
+
+document.getElementById('btnClear').addEventListener('click', ()=>{
+  document.getElementById('inputText').value = '';
+  document.getElementById('outputText').value = '';
+  document.getElementById('status').textContent = 'Cleared';
+  setTimeout(()=>document.getElementById('status').textContent='Ready',900);
+});
+</script>
+</body>
+</html>
